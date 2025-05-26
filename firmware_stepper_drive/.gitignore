@@ -1,0 +1,7 @@
+*.o
+.idea/*.xml
+.idea/*.iml
+*.elf
+*.bin
+*.hex
+test

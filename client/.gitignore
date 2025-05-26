@@ -1,0 +1,12 @@
+.idea/*.xml
+.idea/*.iml
+.idea/inspectionProfiles
+*__pycache__/
+*.py[cod]
+*.egg-info
+.coverage*
+html*
+*.log
+*.tmp
+.*cache*
+.nox/
