@@ -60,7 +60,7 @@ dude: output.bin
 	avrdude -p$(MCU) -carduino -P$(AVRDUDE_PORT) -b 57600 -Uflash:w:output.bin
 
 format:
-	clang-format -i src/*.[ch] test/*.[ch]
+	clang-format -i src/*.[ch]
 
 test:
 	gcc $(TEST_FLAGS) test.c -o test -O0 -ggdb -std=c11 -Wall -Wextra -Werror -pedantic -Isrc \
