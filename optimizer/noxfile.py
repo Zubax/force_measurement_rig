@@ -44,16 +44,16 @@ def test(session):
     # PyTest
     session.run("coverage", "run", "-m", "pytest")
 
-    # # Coverage report
-    # session.run("coverage", "report", "--fail-under=25")
-    # if session.interactive:
-    #     session.run("coverage", "html")
-    #     report_file = Path.cwd().resolve() / "htmlcov" / "index.html"
-    #     session.log(f"OPEN IN WEB BROWSER: file://{report_file}")
-    #
-    # # Static analysis
-    # session.run("mypy", "--strict", ".")
-    session.run("pylint", "src")
+    # Coverage report
+    session.run("coverage", "report", "--fail-under=25")
+    if session.interactive:
+        session.run("coverage", "html")
+        report_file = Path.cwd().resolve() / "htmlcov" / "index.html"
+        session.log(f"OPEN IN WEB BROWSER: file://{report_file}")
+
+    # Static analysis
+    session.run("mypy", "--strict", ".")
+    # session.run("pylint", "src")
 
 
 @nox.session(reuse_venv=True)
