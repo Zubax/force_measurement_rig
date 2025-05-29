@@ -35,21 +35,21 @@ async def command_drive(port: serial.Serial) -> None:
     loop = asyncio.get_running_loop()
     try:
         while True:
-            command = np.int32(-1)
+            command = np.int32(1)
             print(f"Sending command: {step_to_direction(command)}")
             while not await iom.send_command(command):
                 print("Sending command...")
             print(f"Command sent successfully")
-            # feedback_command = await fetch()
-            # print(f"Feedback command: %s", step_to_direction(feedback_command.step))
+            feedback_command = await fetch()
+            print(f"Feedback command: %s", step_to_direction(feedback_command.step))
     except KeyboardInterrupt:
         pass
     finally:
         iom.close()
 
 def main() -> None:
-    # step_drive_port = serial.serial_for_url("/dev/ttyUSB0", baudrate=38400)
-    step_drive_port = serial.serial_for_url("loop://") # For this to work, comment out "await self._once()" in IOManager::flush()
+    step_drive_port = serial.serial_for_url("/dev/ttyUSB0", baudrate=38400)
+    # step_drive_port = serial.serial_for_url("loop://") # For this to work, comment out "await self._once()" in IOManager::flush()
     asyncio.run(command_drive(step_drive_port))
 
 
