@@ -423,7 +423,7 @@ async def display(port: serial.Serial, fir_order: int, calibrate_zero_bias: bool
 
     async def do_bias_calibration(uncalibrated_forces: NDArray[np.float64], n_samples: int) -> NDArray[np.float64]:
         agg = np.zeros_like(uncalibrated_forces)
-        with click.progressbar(length=n_samples, label="Zero bias calibration", show_eta=False) as bar:  # type: ignore
+        with click.progressbar(length=n_samples, label="Zero bias calibration", show_eta=False) as bar:
             for _ in range(n_samples):
                 agg += compute_forces(await fetch())
                 bar.update(1)
