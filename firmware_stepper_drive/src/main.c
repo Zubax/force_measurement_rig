@@ -3,22 +3,18 @@
 #include "platform.h"
 #include "packet.h"
 
-enum Direction {
-    BACK,
-    STOP,
-    FORWARD
-  };
+#include <string.h>
 
-void direction_step(enum Direction direction)
+void execute_step(const int32_t step)
 {
-    switch (direction) {
-    case BACK:
+    switch (step) {
+    case -1:
         platform_driver_step(false);
         break;
-    case FORWARD:
+    case 1:
         platform_driver_step(true);
         break;
-    case STOP:
+    case 0:
     default:
         platform_driver_stop();
     }
@@ -27,20 +23,20 @@ void direction_step(enum Direction direction)
 int main(void)
 {
     struct packet_parser parser  = {0};
-    enum Direction direction = BACK;
+    int32_t received_step = 0;
 
     platform_init();
     platform_driver_setup();
-    direction_step(direction);
+    execute_step(received_step);
 
     while (true)
     {
         platform_kick_watchdog();
 
         // Step in the current direction
-        direction_step(direction);
+        execute_step(received_step);
         // Send the current direction
-        packet_send(sizeof(direction), &direction, platform_serial_write);
+        packet_send(sizeof(received_step), &received_step, platform_serial_write);
 
         // Process the pending incoming data. There may be many bytes accumulated in the buffer.
         while (true)
@@ -52,7 +48,10 @@ int main(void)
             }
             if (packet_parse(&parser, (uint8_t) rx))
             {
-                // current_direction = platform_process_command(parser.payload_size, parser.payload);
+                if (parser.payload_size == sizeof(int32_t))
+                {
+                    memcpy(&received_step, parser.payload, sizeof(int32_t));
+                }
             }
         }
     }
