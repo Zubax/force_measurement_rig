@@ -1,8 +1,17 @@
 import asyncio
+import sys
+import os
+
+# Add the src directory to sys.path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 from config_client import CyphalContext
 import numpy as np
 
 from uavcan.primitive.array import Integer32_1
+
+# TODO BEFORE RUNNING TEST:
+# export CYPHAL_PATH="$HOME/force_measurement_rig/optimizer/lib/public_regulated_data_types:$HOME/force_measurement_rig/optimizer/lib/zubax_dsdl"
+# export PYCYPHAL_PATH="$HOME/force_measurement_rig/optimizer/dsdl_types"
 
 
 async def main() -> None:
