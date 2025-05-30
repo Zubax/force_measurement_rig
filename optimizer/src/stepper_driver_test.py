@@ -47,6 +47,7 @@ async def command_drive(port: serial.Serial) -> None:
     finally:
         iom.close()
 
+
 def main() -> None:
     step_drive_port = serial.serial_for_url("/dev/ttyUSB0", baudrate=38400)
     # step_drive_port = serial.serial_for_url("loop://") # For this to work, comment out "await self._once()" in IOManager::flush()

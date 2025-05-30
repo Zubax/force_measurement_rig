@@ -11,6 +11,7 @@ from force_measurement_utils import compute_forces, MovingAverage
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(process)07d %(levelname)-3.3s %(name)s: %(message)s")
 _logger = logging.getLogger(__name__)
 
+
 async def display(port: serial.Serial, fir_order: int, calibrate_zero_bias: bool) -> None:
     """
     Display the force readings from the FMR rig in a human-readable format. This is the main command.
@@ -61,6 +62,7 @@ async def display(port: serial.Serial, fir_order: int, calibrate_zero_bias: bool
         pass
     finally:
         iom.close()
+
 
 def main() -> None:
     force_sensor_port = serial.serial_for_url("/dev/ttyUSB0", baudrate=38400)

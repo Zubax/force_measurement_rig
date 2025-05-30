@@ -5,6 +5,7 @@ from serial_interface import ForceSensorReading
 
 T = TypeVar("T")
 
+
 class MovingAverage(Generic[T]):
     """
     >>> ma = MovingAverage(3, 0)
@@ -35,6 +36,7 @@ class MovingAverage(Generic[T]):
         self._sum += value  # type: ignore
         self._index = (self._index + 1) % len(self._values)
         return self._sum * (1 / len(self._values))  # type: ignore
+
 
 def compute_forces(rd: ForceSensorReading) -> NDArray[np.float64]:
     return np.array(

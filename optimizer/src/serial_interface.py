@@ -11,6 +11,7 @@ from numpy.typing import NDArray
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(process)07d %(levelname)-3.3s %(name)s: %(message)s")
 _logger = logging.getLogger(__name__)
 
+
 @dataclasses.dataclass(frozen=True)
 class Packet:
     """
@@ -104,6 +105,7 @@ class Packet:
             )
         )
 
+
 class CRC16CCITTFalse:
     """
     - Name:           CRC-16/CCITT-FALSE
@@ -181,6 +183,7 @@ class CRC16CCITTFalse:
     ]
     # fmt: on
 
+
 class IOManager:
     BAUD = 38400
 
@@ -211,6 +214,7 @@ class IOManager:
     def __repr__(self) -> str:
         return f"{type(self).__name__}(serial_port={self._port})"
 
+
 @dataclasses.dataclass(frozen=True)
 class ForceSensorReading:
     """
@@ -222,6 +226,7 @@ class ForceSensorReading:
     calibration: NDArray[np.float64]
 
     CHANNEL_COUNT = 4
+
 
 class ForceSensorIOManager(IOManager):
     """
@@ -263,7 +268,7 @@ class ForceSensorIOManager(IOManager):
                     calibration=np.frombuffer(calibration, dtype=np.float32, count=ForceSensorReading.CHANNEL_COUNT * 2)
                     .reshape((2, ForceSensorReading.CHANNEL_COUNT))
                     .astype(np.float64),
-                    )
+                )
             if deadline < asyncio.get_event_loop().time():
                 return None
             await asyncio.sleep(1e-3)
@@ -277,12 +282,15 @@ class ForceSensorIOManager(IOManager):
         rd = await self.read(asyncio.get_event_loop().time() + 10)
         return rd is not None and np.allclose(rd.calibration, cal, atol=1e-3, rtol=1e-3, equal_nan=True)
 
+
 @dataclasses.dataclass(frozen=True)
 class StepDriveCommand:
     """
     Step command that is sent to motor step driver
     """
-    step: np.int32 # 0 = stop, 1 = forward, -1 = backward
+
+    step: np.int32  # 0 = stop, 1 = forward, -1 = backward
+
 
 class StepDriveIOManager(IOManager):
     """
@@ -314,10 +322,8 @@ class StepDriveIOManager(IOManager):
         while True:
             pkt = await self._once()
             if pkt is not None:
-                step, = self._STRUCT_COMMAND.unpack_from(pkt.payload)
-                return StepDriveCommand(
-                    step=np.int32(step)
-                )
+                (step,) = self._STRUCT_COMMAND.unpack_from(pkt.payload)
+                return StepDriveCommand(step=np.int32(step))
             if deadline < asyncio.get_event_loop().time():
                 return None
             await asyncio.sleep(1e-3)
@@ -325,7 +331,7 @@ class StepDriveIOManager(IOManager):
     async def send_command(self, command: np.int32) -> bool:
         payload = command.astype(np.int32).tobytes()
         buf = Packet(memoryview(payload)).compile()
-        res = await asyncio.to_thread( self._port.write, buf)
+        res = await asyncio.to_thread(self._port.write, buf)
         assert res is not None
         await asyncio.sleep(1.0)
         await self.flush()
