@@ -1,0 +1,6 @@
+[submodule "optimizer/lib/public_regulated_data_types"]
+	path = optimizer/lib/public_regulated_data_types
+	url = https://github.com/OpenCyphal/public_regulated_data_types
+[submodule "optimizer/lib/zubax_dsdl"]
+	path = optimizer/lib/zubax_dsdl
+	url = https://github.com/Zubax/zubax_dsdl

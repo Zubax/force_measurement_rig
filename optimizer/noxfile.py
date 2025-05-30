@@ -10,6 +10,10 @@ PYTHONS = ["3.12"]
 
 nox.options.error_on_external_run = True
 
+PROJECT_ROOT = Path(__file__).resolve()
+LIB_DIR = PROJECT_ROOT / "lib"
+DSDL_DIR = PROJECT_ROOT / "dsdl_types"
+
 
 @nox.session(python=False)
 def clean(session):
@@ -34,6 +38,27 @@ def clean(session):
 def test(session):
     session.install("-e", ".")
     session.install("-r", "requirements.txt")
+
+    pytest_env = {
+        "CYPHAL_PATH": os.pathsep.join(  # DSDL namespace directories.
+            map(
+                str,
+                [  # Notice that we're not including the existing path here but overriding it entirely.
+                    LIB_DIR / "public_regulated_data_types",
+                    LIB_DIR / "zubax_dsdl",
+                ],
+            )
+        ),
+        "PYCYPHAL_PATH": DSDL_DIR,  # Use temp dir to not interfere with the system installation.
+        # "PYTHONPATH": os.pathsep.join(
+        #     [
+        #         os.environ.get("PYTHONPATH", ""),
+        #         str(EPM_PROJECT_ROOT) + "/scripts",
+        #         ]
+        # ),
+        # "EPM_PROJECT_ROOT": str(EPM_PROJECT_ROOT),
+    }
+
     session.install(
         "pytest     ~= 7.3",
         "coverage   ~= 7.2",

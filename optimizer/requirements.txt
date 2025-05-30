@@ -1,2 +1,4 @@
 pyserial    ~= 3.5
 numpy       ~= 1.24
+pycyphal[transport-can-pythoncan]~=1.17.0
+nunavut~=2.3

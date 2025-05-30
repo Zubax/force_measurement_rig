@@ -11,3 +11,4 @@ html*
 .*cache*
 .nox/
 .venv/
+dsdl_types/
