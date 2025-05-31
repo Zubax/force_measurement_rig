@@ -5,15 +5,17 @@ import pycyphal
 import logging
 import asyncio
 import collections.abc
+import time
 
 from typing import Optional
 from pathlib import Path
-from typing import Iterator
+from typing import Iterator, Awaitable
 
 from pycyphal.application import Node, make_transport
 from pycyphal.application.node_tracker import NodeTracker
 from pycyphal.application.register import ValueProxy, ValueProxyWithFlags, Natural16, Natural32
 from pycyphal.transport import Transport
+from pycyphal.presentation import Publisher, Subscriber
 
 # DSDL imports
 from uavcan.node import ID_1
@@ -23,9 +25,10 @@ from uavcan.node import Heartbeat_1
 from uavcan.node import ExecuteCommand_1
 from uavcan.pnp import NodeIDAllocationData_1
 from uavcan.primitive.array import Integer32_1
+from uavcan.primitive.scalar import Integer8_1
 from uavcan.register import Access_1, List_1, Name_1
+from zubax.fluxgrip import Feedback_0
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(process)07d %(levelname)-3.3s %(name)s: %(message)s")
 _logger = logging.getLogger(__name__)
 
 
@@ -149,14 +152,18 @@ class RegisterProxy(collections.abc.Mapping[str, pycyphal.application.register.V
 
 DEFAULT_CONTROLLER_NODE_ID = 1
 DEFAULT_TARGET_NODE_ID = 125
+EXPECTED_COMMAND_TOPIC_ID = 1000
+EXPECTED_FEEDBACK_TOPIC_ID = 1001
 
 
-class CyphalContext:
+class FluxGripConfig:
     def __init__(self) -> None:
         # ControllerNode-related
         self._transport: Optional[Transport] = None
         self._controller_node: Optional[Node] = None
         self._node_tracker: Optional[NodeTracker] = None
+        self._pub_command: Optional[Publisher] = None
+        self._sub_feedback: Optional[Subscriber] = None
 
         # TargetNode-related
         # self._target_node: Optional[Node] = None
@@ -208,6 +215,12 @@ class CyphalContext:
         self._register_proxy = RegisterProxy(self._controller_node, DEFAULT_TARGET_NODE_ID)
         await self._register_proxy.reload()
 
+        _logger.info("Setting up Command publisher")
+        self._pub_command = self._controller_node.make_publisher(Integer8_1, EXPECTED_COMMAND_TOPIC_ID)
+
+        _logger.info("Setting up Feedback subscriber")
+        self._sub_feedback = self._controller_node.make_subscriber(Feedback_0, EXPECTED_FEEDBACK_TOPIC_ID)
+
     def close(self) -> None:
         self._controller_node.close()
         _logger.info(f"Controller node closed!")
@@ -224,3 +237,50 @@ class CyphalContext:
         assert resp.status == ExecuteCommand_1.Response.STATUS_SUCCESS
         await asyncio.sleep(5)  # Give some time for reboot to start
         await self.wait_for_node_online()
+
+    @staticmethod
+    async def wait_for(function: Awaitable, doc: str, timeout: int, timeout_fail: bool = True) -> None:
+        """Wait for an async function to complete or fail if timeout is reached"""
+        try:
+            await asyncio.wait_for(function, timeout)
+        except asyncio.TimeoutError:
+            if timeout_fail:
+                raise TimeoutError(f"Timeout while waiting for: {doc}")
+            else:
+                print(f"Warning: Timeout while waiting for: {doc}")
+
+    async def magnetize(self) -> None:
+        feedback_msg = await self._sub_feedback.get(5)
+        assert feedback_msg.magnetized == False
+
+        assert await self._pub_command.publish(Integer8_1(value=1))
+
+        async def wait_for_magnet_to_magnetize() -> None:
+            feedback_msg = await self._sub_feedback.get(5)
+            while feedback_msg.magnetized:
+                _logger.info("Waiting for magnet to magnetize")
+                await asyncio.sleep(1)
+                feedback_msg = await self._sub_feedback.get(5)
+
+        try:
+            await asyncio.wait_for(wait_for_magnet_to_magnetize(), timeout=10)
+        except asyncio.TimeoutError:
+            raise TimeoutError("Timeout while waiting for magnet to magnetize")
+
+    async def demagnetize(self) -> None:
+        feedback_msg = await self._sub_feedback.get(5)
+        assert feedback_msg.magnetized == True
+
+        assert await self._pub_command.publish(Integer8_1(value=0))
+
+        async def wait_for_magnet_to_demagnetize() -> None:
+            feedback_msg = await self._sub_feedback.get(5)
+            while feedback_msg.magnetized:
+                _logger.info("Waiting for magnet to magnetize")
+                await asyncio.sleep(1)
+                feedback_msg = await self._sub_feedback.get(5)
+
+        try:
+            await asyncio.wait_for(wait_for_magnet_to_demagnetize(), timeout=10)
+        except asyncio.TimeoutError:
+            raise TimeoutError("Timeout while waiting for magnet to demagnetize")
