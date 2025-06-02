@@ -73,7 +73,7 @@ void platform_driver_setup(void)
     // Set Timer1 to CTC mode with Toggle on Compare Match on OC1A
     TCCR1A = (1 << COM1A0); // Toggle OC1A on compare match
     TCCR1B = (1 << WGM12) | (1 << CS10); // CTC mode, prescaler = 1
-    OCR1A = 4999; // Compare match value for 1600 Hz output
+    OCR1A = 10000; // Compare match value for 1600 Hz output
 
     DDRB |= (1 << PB2);  // Enable output on D10 (PB2) [DIRECTION]
     pin_write((struct pin_spec){&PORTB, 2}, false);
@@ -83,24 +83,20 @@ void platform_driver_step(bool direction)
 {
     DDRB |= (1 << PB1);  // Enable output on D9 (PB1) [PULSE
     // Update DIR pin
-    static bool current_direction = false;
-    if (current_direction != direction)
+    if (direction)
     {
-        if (direction)
-        {
-            pin_write((struct pin_spec){&PORTB, 2}, true);
-        }
-        else
-        {
-            pin_write((struct pin_spec){&PORTB, 2}, false);
-        }
+        pin_write((struct pin_spec){&PORTB, 2}, true);
+    }
+    else
+    {
+        pin_write((struct pin_spec){&PORTB, 2}, false);
     }
 
     // Toggle PUL pin
-    pin_write((struct pin_spec){&PORTB, 1}, true);
-    _delay_us(100);
-    pin_write((struct pin_spec){&PORTB, 1}, false);
-    _delay_us(100);
+    // pin_write((struct pin_spec){&PORTB, 1}, true);
+    // _delay_us(200);
+    // pin_write((struct pin_spec){&PORTB, 1}, false);
+    // _delay_us(200);
 }
 
 void platform_driver_stop(void)

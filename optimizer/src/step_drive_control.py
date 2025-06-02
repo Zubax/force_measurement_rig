@@ -35,20 +35,31 @@ class StepDriveControl(IOManager):
     >>> _ = port.write(valid_packet)
     >>> async def test():
     ...     reader = StepDriveControl(port)
-    ...     command = await reader.read(asyncio.get_event_loop().time() + 1)
+    ...     command = await reader.fetch(timeout=1)
     ...     assert command is not None
     ...     assert command.step == np.int32(-1)
-    ...     command = await reader.read(asyncio.get_event_loop().time() + 1)
+    ...     command = await reader.fetch(timeout=1)
     ...     assert command is None
     ...     reader.close()
     >>> asyncio.run(test())
     """
 
     _STRUCT_COMMAND = struct.Struct(r"< i")
-
     _DIRECTION_TO_STEP = {"UP": np.int32(-1), "STOP": np.int32(0), "DOWN": np.int32(1)}
 
-    async def read(self, deadline: float) -> StepDriveCommand | None:
+    @staticmethod
+    def step_to_direction(step: np.int32) -> str:
+        if step == -1:
+            return "UP"
+        elif step == 0:
+            return "STOP"
+        elif step == 1:
+            return "DOWN"
+        else:
+            raise ValueError(f"Invalid step value: {step}")
+
+    async def fetch(self, timeout: float) -> StepDriveCommand | None:
+        deadline = asyncio.get_event_loop().time() + timeout
         while True:
             pkt = await self._once()
             if pkt is not None:
@@ -65,10 +76,11 @@ class StepDriveControl(IOManager):
         assert res is not None
         await asyncio.sleep(1.0)
         await self.flush()
-        rd = await self.read(asyncio.get_event_loop().time() + 1)
+        rd = await self.fetch(timeout=1)
         return rd is not None and (rd.step == command)
 
     async def up(self):
+        _logger.info("ARM IS MOVING UP")
         while not await self._send_command(self._DIRECTION_TO_STEP["UP"]):
             _logger.info("Sending command to pull arm up")
 
@@ -77,16 +89,6 @@ class StepDriveControl(IOManager):
             _logger.info("Sending command to stop arm")
 
     async def down(self):
+        _logger.info("ARM IS MOVING DOWN")
         while not await self._send_command(self._DIRECTION_TO_STEP["DOWN"]):
             _logger.info("Sending command to pull arm down")
-
-    @staticmethod
-    def step_to_direction(step: np.int32) -> str:
-        if step == -1:
-            return "BACKWARD"
-        elif step == 0:
-            return "STOP"
-        elif step == 1:
-            return "FORWARD"
-        else:
-            raise ValueError(f"Invalid step value: {step}")

@@ -5,7 +5,6 @@ import pycyphal
 import logging
 import asyncio
 import collections.abc
-import time
 
 from typing import Optional
 from pathlib import Path
@@ -18,12 +17,8 @@ from pycyphal.transport import Transport
 from pycyphal.presentation import Publisher, Subscriber
 
 # DSDL imports
-from uavcan.node import ID_1
-from uavcan.node import Mode_1
 from uavcan.node import GetInfo_1
-from uavcan.node import Heartbeat_1
 from uavcan.node import ExecuteCommand_1
-from uavcan.pnp import NodeIDAllocationData_1
 from uavcan.primitive.array import Integer32_1
 from uavcan.primitive.scalar import Integer8_1
 from uavcan.register import Access_1, List_1, Name_1
@@ -68,7 +63,6 @@ class RegisterProxy(collections.abc.Mapping[str, pycyphal.application.register.V
                 names.add(name)
             else:
                 break
-        # logger.info(f"{self}: Fetched names: {names}")
         self._cache.clear()
         for n in names:
             await self.read_through(n)
@@ -166,7 +160,6 @@ class FluxGripConfig:
         self._sub_feedback: Optional[Subscriber] = None
 
         # TargetNode-related
-        # self._target_node: Optional[Node] = None
         self._register_proxy: Optional[RegisterProxy] = None
 
     async def wait_for_node_online(self) -> None:
@@ -238,19 +231,17 @@ class FluxGripConfig:
         await asyncio.sleep(5)  # Give some time for reboot to start
         await self.wait_for_node_online()
 
-    @staticmethod
-    async def wait_for(function: Awaitable, doc: str, timeout: int, timeout_fail: bool = True) -> None:
-        """Wait for an async function to complete or fail if timeout is reached"""
-        try:
-            await asyncio.wait_for(function, timeout)
-        except asyncio.TimeoutError:
-            if timeout_fail:
-                raise TimeoutError(f"Timeout while waiting for: {doc}")
-            else:
-                print(f"Warning: Timeout while waiting for: {doc}")
+    async def sub_feedback_flush(self):
+        # QUESTION: Is there a better way to deal with this issue?
+        _ = await self._sub_feedback.get()
+        _ = await self._sub_feedback.get()
+        _ = await self._sub_feedback.get()
+        _ = await self._sub_feedback.get()
 
     async def magnetize(self) -> None:
-        feedback_msg = await self._sub_feedback.get(5)
+        await self.sub_feedback_flush()
+        feedback_msg = await self._sub_feedback.get(20)
+        assert feedback_msg is not None
         assert feedback_msg.magnetized == False
 
         assert await self._pub_command.publish(Integer8_1(value=1))
@@ -264,11 +255,14 @@ class FluxGripConfig:
 
         try:
             await asyncio.wait_for(wait_for_magnet_to_magnetize(), timeout=10)
+            _logger.info("Magnetized successfully")
         except asyncio.TimeoutError:
             raise TimeoutError("Timeout while waiting for magnet to magnetize")
 
     async def demagnetize(self) -> None:
-        feedback_msg = await self._sub_feedback.get(5)
+        await self.sub_feedback_flush()
+        feedback_msg = await self._sub_feedback.get(20)
+        assert feedback_msg is not None
         assert feedback_msg.magnetized == True
 
         assert await self._pub_command.publish(Integer8_1(value=0))
@@ -276,11 +270,12 @@ class FluxGripConfig:
         async def wait_for_magnet_to_demagnetize() -> None:
             feedback_msg = await self._sub_feedback.get(5)
             while feedback_msg.magnetized:
-                _logger.info("Waiting for magnet to magnetize")
+                _logger.info("Waiting for magnet to demagnetize")
                 await asyncio.sleep(1)
                 feedback_msg = await self._sub_feedback.get(5)
 
         try:
             await asyncio.wait_for(wait_for_magnet_to_demagnetize(), timeout=10)
+            _logger.info("Demagnetized successfully")
         except asyncio.TimeoutError:
             raise TimeoutError("Timeout while waiting for magnet to demagnetize")

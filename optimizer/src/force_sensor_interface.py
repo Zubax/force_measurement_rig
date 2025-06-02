@@ -11,8 +11,6 @@ from serial_interface import IOManager, Packet
 from numpy.typing import NDArray
 from typing import Optional, TypeVar, Generic
 
-from src.force_measurement_utils import compute_forces
-
 _logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -80,12 +78,12 @@ class ForceSensorInterface(IOManager):
     >>> _ = port.write(valid_packet)
     >>> async def test():
     ...     reader = ForceSensorInterface(port)
-    ...     reading = await reader.read_raw(asyncio.get_event_loop().time() + 1)
+    ...     reading = await reader.fetch(timeout=1)
     ...     assert reading is not None
     ...     assert reading.seq_num == 2
     ...     assert (reading.adc_readings == [261069056, 73710592, 0, 0]).all()
     ...     assert reading.calibration.shape == (2, 4)
-    ...     reading = await reader.read(asyncio.get_event_loop().time() + 1)
+    ...     reading = await reader.fetch(timeout=1)
     ...     assert reading is None
     ...     reader.close()
     >>> asyncio.run(test())
@@ -102,20 +100,20 @@ class ForceSensorInterface(IOManager):
         self._f_peak: np.float64 = np.float64(0)
 
     async def do_bias_calibration(self, n_samples: int = 50) -> None:
-        assert self._zero_bias is None, "Calibration is already done"
-        rd = await self.fetch()
-        uncalibrated_forces = compute_forces(rd)
+        # assert self._zero_bias is None, "Calibration is already done"
+        rd = await self.fetch(timeout=5)
+        uncalibrated_forces = self.compute_forces(rd)
         self._lpf = MovingAverage(self._fir_order, uncalibrated_forces)
         agg = np.zeros_like(uncalibrated_forces)
-        _logger.info("Zero bias calibration:")
+        _logger.info("Zero bias calibration!")
         for i in range(n_samples):
-            agg += compute_forces(await self.fetch())
+            agg += self.compute_forces(await self.fetch(timeout=1))
             progress = (i + 1) / n_samples * 100
-            _logger.info(f"\rProgress: {progress:6.2f}% ({i + 1}/{n_samples})")
-        _logger.info("\r\n")
+            # _logger.info(f"Progress: {progress:6.2f}% ({i + 1}/{n_samples})")
         self._zero_bias = agg / n_samples
 
-    async def fetch(self) -> ForceSensorReading:
+    async def fetch(self, timeout: float) -> ForceSensorReading | None:
+        deadline = asyncio.get_event_loop().time() + timeout
         while True:
             if pkt := await self._once():
                 seq_num, adc_readings, calibration = self._STRUCT_READING.unpack_from(pkt.payload)
@@ -126,6 +124,8 @@ class ForceSensorInterface(IOManager):
                     .reshape((2, ForceSensorReading.CHANNEL_COUNT))
                     .astype(np.float64),
                 )
+            if deadline < asyncio.get_event_loop().time():
+                return None
             await asyncio.sleep(1e-3)
 
     @staticmethod
@@ -140,15 +140,15 @@ class ForceSensorInterface(IOManager):
     async def read_instant_force(self, timeout: int) -> np.float64:
         assert self._zero_bias is not None, "Calibration hasn't been done"
 
-        rd = await asyncio.wait_for(self.fetch(), timeout=timeout)
+        rd = await asyncio.wait_for(self.fetch(timeout=timeout), timeout=timeout)
 
-        forces = self._lpf(np.float64(compute_forces(rd) - self._zero_bias))
+        forces = self._lpf(np.float64(self.compute_forces(rd) - self._zero_bias))
         f_instant = np.sum(forces)
         self._f_peak = f_instant if abs(f_instant) > abs(self._f_peak) else self._f_peak
         return f_instant
 
     def reset_peak_force(self):
-        self._f_peak = np.float64[0]
+        self._f_peak = np.float64(0)
 
     def read_peak_force(self) -> np.float64:
         return self._f_peak
@@ -159,5 +159,5 @@ class ForceSensorInterface(IOManager):
         await asyncio.get_event_loop().run_in_executor(self._executor, self._port.write, buf)
         await asyncio.sleep(1.0)
         await self.flush()
-        rd = await self.fetch()
+        rd = await self.fetch(timeout=1)
         return np.allclose(rd.calibration, cal, atol=1e-3, rtol=1e-3, equal_nan=True)
