@@ -4,13 +4,14 @@
 import shutil
 from pathlib import Path
 import nox
+import os
 
 
 PYTHONS = ["3.12"]
 
 nox.options.error_on_external_run = True
 
-PROJECT_ROOT = Path(__file__).resolve()
+PROJECT_ROOT = Path(__file__).parent.resolve()
 LIB_DIR = PROJECT_ROOT / "lib"
 DSDL_DIR = PROJECT_ROOT / "dsdl_types"
 
@@ -58,6 +59,7 @@ def test(session):
         # ),
         # "EPM_PROJECT_ROOT": str(EPM_PROJECT_ROOT),
     }
+    session.log(f"Environment: {pytest_env}")
 
     session.install(
         "pytest     ~= 7.3",
@@ -67,7 +69,7 @@ def test(session):
     )
 
     # PyTest
-    session.run("coverage", "run", "-m", "pytest")
+    session.run("coverage", "run", "-m", "pytest", env=pytest_env)
 
     # Coverage report
     session.run("coverage", "report", "--fail-under=25")

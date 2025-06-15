@@ -1,14 +1,12 @@
 from __future__ import annotations
-import asyncio
-import dataclasses
-import logging
-import struct
-import serial
-import concurrent.futures
-import numpy as np
-from numpy.typing import NDArray
 
-logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(process)07d %(levelname)-3.3s %(name)s: %(message)s")
+import asyncio
+import serial
+import struct
+import logging
+import dataclasses
+import concurrent.futures
+
 _logger = logging.getLogger(__name__)
 
 
@@ -213,127 +211,3 @@ class IOManager:
 
     def __repr__(self) -> str:
         return f"{type(self).__name__}(serial_port={self._port})"
-
-
-@dataclasses.dataclass(frozen=True)
-class ForceSensorReading:
-    """
-    A single reading reported by the digitizer.
-    """
-
-    seq_num: int
-    adc_readings: NDArray[np.int32]
-    calibration: NDArray[np.float64]
-
-    CHANNEL_COUNT = 4
-
-
-class ForceSensorIOManager(IOManager):
-    """
-    Reads the data from the serial port and parses it into readings.
-    Also allows sending commands to the digitizer.
-
-    >>> import serial
-    >>> import time
-    >>> port = serial.serial_for_url("loop://")
-    >>> valid_packet = bytes.fromhex(
-    ...     "B44CECF250000000"
-    ...     "020000000000000000000000000000000000000000000000"
-    ...     "00998F0F00BC64040000000000000000"
-    ...     "FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF"
-    ...     "473D")
-    >>> _ = port.write(valid_packet)
-    >>> async def test():
-    ...     reader = ForceSensorIOManager(port)
-    ...     reading = await reader.read(asyncio.get_event_loop().time() + 1)
-    ...     assert reading is not None
-    ...     assert reading.seq_num == 2
-    ...     assert (reading.adc_readings == [261069056, 73710592, 0, 0]).all()
-    ...     assert reading.calibration.shape == (2, 4)
-    ...     reading = await reader.read(asyncio.get_event_loop().time() + 1)
-    ...     assert reading is None
-    ...     reader.close()
-    >>> asyncio.run(test())
-    """
-
-    _STRUCT_READING = struct.Struct(r"< Q 8x 8x 16s 40s")
-
-    async def read(self, deadline: float) -> ForceSensorReading | None:
-        while True:
-            if pkt := await self._once():
-                seq_num, adc_readings, calibration = self._STRUCT_READING.unpack_from(pkt.payload)
-                return ForceSensorReading(
-                    seq_num=seq_num,
-                    adc_readings=np.frombuffer(adc_readings, dtype=np.int32, count=ForceSensorReading.CHANNEL_COUNT),
-                    calibration=np.frombuffer(calibration, dtype=np.float32, count=ForceSensorReading.CHANNEL_COUNT * 2)
-                    .reshape((2, ForceSensorReading.CHANNEL_COUNT))
-                    .astype(np.float64),
-                )
-            if deadline < asyncio.get_event_loop().time():
-                return None
-            await asyncio.sleep(1e-3)
-
-    async def write_calibration(self, cal: NDArray[np.float64]) -> bool:
-        payload = cal.astype(np.float32).tobytes()
-        buf = Packet(memoryview(payload)).compile()
-        await asyncio.get_event_loop().run_in_executor(self._executor, self._port.write, buf)
-        await asyncio.sleep(1.0)
-        await self.flush()
-        rd = await self.read(asyncio.get_event_loop().time() + 10)
-        return rd is not None and np.allclose(rd.calibration, cal, atol=1e-3, rtol=1e-3, equal_nan=True)
-
-
-@dataclasses.dataclass(frozen=True)
-class StepDriveCommand:
-    """
-    Step command that is sent to motor step driver
-    """
-
-    step: np.int32  # 0 = stop, 1 = forward, -1 = backward
-
-
-class StepDriveIOManager(IOManager):
-    """
-    Reads the data from the serial port and parses it into commands.
-    Also allows sending commands to the motor step driver.
-
-    >>> import serial
-    >>> import time
-    >>> port = serial.serial_for_url("loop://")
-    >>> valid_packet = bytes.fromhex(
-    ...     "B44CECF204000000"
-    ...     "FFFFFFFF"
-    ...     "1D0F")
-    >>> _ = port.write(valid_packet)
-    >>> async def test():
-    ...     reader = StepDriveIOManager(port)
-    ...     command = await reader.read(asyncio.get_event_loop().time() + 1)
-    ...     assert command is not None
-    ...     assert command.step == np.int32(-1)
-    ...     command = await reader.read(asyncio.get_event_loop().time() + 1)
-    ...     assert command is None
-    ...     reader.close()
-    >>> asyncio.run(test())
-    """
-
-    _STRUCT_COMMAND = struct.Struct(r"< i")
-
-    async def read(self, deadline: float) -> StepDriveCommand | None:
-        while True:
-            pkt = await self._once()
-            if pkt is not None:
-                (step,) = self._STRUCT_COMMAND.unpack_from(pkt.payload)
-                return StepDriveCommand(step=np.int32(step))
-            if deadline < asyncio.get_event_loop().time():
-                return None
-            await asyncio.sleep(1e-3)
-
-    async def send_command(self, command: np.int32) -> bool:
-        payload = command.astype(np.int32).tobytes()
-        buf = Packet(memoryview(payload)).compile()
-        res = await asyncio.to_thread(self._port.write, buf)
-        assert res is not None
-        await asyncio.sleep(1.0)
-        await self.flush()
-        rd = await self.read(asyncio.get_event_loop().time() + 1)
-        return rd is not None and (rd.step == command)

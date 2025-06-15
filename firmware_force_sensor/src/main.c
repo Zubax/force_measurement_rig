@@ -18,10 +18,16 @@ _Static_assert(sizeof(struct reading) == 80, "Invalid layout");  // NOLINT(reada
 int main(void)
 {
     platform_init();
-    struct packet_parser parser  = {0};
+    // struct packet_parser parser  = {0};
     struct reading       reading = {0};
 
-    platform_calibration_read(CALIBRATION_DATA_SIZE, reading.calibration_data);
+    // platform_calibration_read(CALIBRATION_DATA_SIZE, reading.calibration_data);
+    uint8_t calibration_data[CALIBRATION_DATA_SIZE];
+    calibration_data[0] = 125;
+    calibration_data[1] = 125;
+    calibration_data[2] = 125;
+    calibration_data[3] = 125;
+    platform_calibration_write(sizeof(calibration_data), calibration_data);
 
     while (true)
     {
@@ -43,11 +49,11 @@ int main(void)
             {
                 break;
             }
-            if (packet_parse(&parser, (uint8_t) rx))
-            {
-                platform_calibration_write(parser.payload_size, parser.payload);
-                platform_calibration_read(CALIBRATION_DATA_SIZE, reading.calibration_data);
-            }
+            // if (packet_parse(&parser, (uint8_t) rx))
+            // {
+                // platform_calibration_write(parser.payload_size, parser.payload);
+                // platform_calibration_read(CALIBRATION_DATA_SIZE, reading.calibration_data);
+            // }
         }
     }
     return 0;
