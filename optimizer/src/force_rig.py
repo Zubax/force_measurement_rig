@@ -75,7 +75,7 @@ class ForceRig:
 
     async def pull_arm_up(self) -> None:
         await self._force_sensor_interface.flush()
-        # await self._force_sensor_interface.do_bias_calibration()
+        await self._force_sensor_interface.do_bias_calibration()
         _ = await self._force_sensor_interface.read_instant_force(timeout=1)
         peak_force = self._force_sensor_interface.read_peak_force()
         _logger.info(f"Peak force before resetting: {peak_force:.1f} N")
@@ -92,6 +92,9 @@ class ForceRig:
                 break
         # and stop arm!
         await self._step_drive_control.stop()
+
+        result = abs(self._force_sensor_interface.read_peak_force()) - abs(peak_force)
+        _logger.info(f"RESULT: {result}")
 
     def read_peak_force(self) -> np.float64:
         peak_force = self._force_sensor_interface.read_peak_force()

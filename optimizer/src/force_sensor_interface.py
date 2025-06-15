@@ -99,65 +99,85 @@ class ForceSensorInterface(IOManager):
         self._lpf: Optional[MovingAverage[np.float64]] = None
         self._f_peak: np.float64 = np.float64(0)
 
-    async def do_bias_calibration(self, n_samples: int = 50) -> None:
-        # assert self._zero_bias is None, "Calibration is already done"
-        rd = await self.fetch(timeout=5)
-        uncalibrated_forces = self.compute_forces(rd)
-        self._lpf = MovingAverage(self._fir_order, uncalibrated_forces)
-        agg = np.zeros_like(uncalibrated_forces)
-        _logger.info("Zero bias calibration!")
-        for i in range(n_samples):
-            agg += self.compute_forces(await self.fetch(timeout=1))
-            progress = (i + 1) / n_samples * 100
-            # _logger.info(f"Progress: {progress:6.2f}% ({i + 1}/{n_samples})")
-        self._zero_bias = agg / n_samples
-
-    async def fetch(self, timeout: float) -> ForceSensorReading | None:
-        deadline = asyncio.get_event_loop().time() + timeout
+    async def read(self, deadline: float) -> ForceSensorReading | None:
+        """
+        Waits for up to the specified deadline for a new reading to arrive.
+        Returns the new reading, or None if the deadline has expired.
+        """
         while True:
             if pkt := await self._once():
                 seq_num, adc_readings, calibration = self._STRUCT_READING.unpack_from(pkt.payload)
-                return ForceSensorReading(
+                rd = ForceSensorReading(
                     seq_num=seq_num,
-                    adc_readings=np.frombuffer(adc_readings, dtype=np.int32, count=ForceSensorReading.CHANNEL_COUNT),
-                    calibration=np.frombuffer(calibration, dtype=np.float32, count=ForceSensorReading.CHANNEL_COUNT * 2)
+                    adc_readings=np.frombuffer(
+                        adc_readings,
+                        dtype=np.int32,
+                        count=ForceSensorReading.CHANNEL_COUNT,
+                    ),
+                    calibration=np.frombuffer(
+                        calibration,
+                        dtype=np.float32,
+                        count=ForceSensorReading.CHANNEL_COUNT * 2,
+                    )
                     .reshape((2, ForceSensorReading.CHANNEL_COUNT))
                     .astype(np.float64),
                 )
+                _logger.debug("%s: Received reading %s", self, rd)
+                return rd
             if deadline < asyncio.get_event_loop().time():
                 return None
-            await asyncio.sleep(1e-3)
-
-    @staticmethod
-    def compute_forces(rd: ForceSensorReading) -> NDArray[np.float64]:
-        return np.array(
-            [
-                np.polynomial.Polynomial(np.flip(coe.flatten()))(float(x))
-                for x, coe in zip(rd.adc_readings, rd.calibration.T)
-            ]
-        )
-
-    async def read_instant_force(self, timeout: int) -> np.float64:
-        assert self._zero_bias is not None, "Calibration hasn't been done"
-
-        rd = await asyncio.wait_for(self.fetch(timeout=timeout), timeout=timeout)
-
-        forces = self._lpf(np.float64(self.compute_forces(rd) - self._zero_bias))
-        f_instant = np.sum(forces)
-        self._f_peak = f_instant if abs(f_instant) > abs(self._f_peak) else self._f_peak
-        return f_instant
-
-    def reset_peak_force(self):
-        self._f_peak = np.float64(0)
-
-    def read_peak_force(self) -> np.float64:
-        return self._f_peak
+            await asyncio.sleep(1e-3)  # This is silly but works for the MVP.
 
     async def write_calibration(self, cal: NDArray[np.float64]) -> bool:
+        """
+        Writes the calibration data to the digitizer and waits for confirmation.
+        Returns True if the calibration was accepted, False otherwise (in which case retrying may help).
+        """
         payload = cal.astype(np.float32).tobytes()
         buf = Packet(memoryview(payload)).compile()
+        _logger.debug("%s: Sending calibration packet: %s", self, buf.hex())
         await asyncio.get_event_loop().run_in_executor(self._executor, self._port.write, buf)
-        await asyncio.sleep(1.0)
+        await asyncio.sleep(1.0)  # Wait for the new data to be processed.
         await self.flush()
-        rd = await self.fetch(timeout=1)
+        rd = await self.read(asyncio.get_event_loop().time() + 10)
+        if rd is None:
+            _logger.info("%s: Calibration confirmation timed out", self)
+            return False
+        _logger.info(
+            "%s: Received calibration confirmation. Sent calibration:\n%s\nReceived calibration:\n%s",
+            self,
+            cal,
+            rd.calibration,
+        )
         return np.allclose(rd.calibration, cal, atol=1e-3, rtol=1e-3, equal_nan=True)
+
+
+def compute_forces(rd: ForceSensorReading) -> NDArray[np.float64]:
+    return np.array(
+        [
+            np.polynomial.Polynomial(np.flip(coe.flatten()))(float(x))
+            for x, coe in zip(rd.adc_readings, rd.calibration.T)
+        ]
+    )
+
+
+async def fetch(iom: ForceSensorInterface, loop: asyncio.AbstractEventLoop) -> ForceSensorReading:
+    rd = await iom.read(deadline=loop.time() + 10.0)
+    if rd is None:
+        raise RuntimeError("Timed out while waiting for data")
+    return rd
+
+
+async def do_bias_calibration(
+    iom: ForceSensorInterface, loop: asyncio.AbstractEventLoop, uncalibrated_forces: NDArray[np.float64], n_samples: int
+) -> NDArray[np.float64]:
+
+    agg = np.zeros_like(uncalibrated_forces)
+    log_interval = max(n_samples // 10, 1)  # Log progress at 10% intervals
+
+    for i in range(n_samples):
+        agg += compute_forces(await fetch(iom, loop))
+        if (i + 1) % log_interval == 0 or i == n_samples - 1:
+            _logger.info("Calibrating bias... %d/%d samples collected", i + 1, n_samples)
+
+    return agg / n_samples

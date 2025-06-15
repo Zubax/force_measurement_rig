@@ -23,18 +23,18 @@ async def main() -> None:
     # fmt: off
     new_demag_values = np.array(
         [
-            -100, -90, -81, +73, +66, -59, -53, +48, -43, +39, -35, +31, -28, +25, -23, +21, -19, +17, -15, +14, -12,
-            +11, -10, +9, -8, +7, -6, +6, -5, +5, -4, +4, -3, +3, -3, +3, -2, +2, -2, +2, -1, +1, -1, +1, -1, +1, -1,
-            +1, -1, -1, -1,
+            -100, +90, -8, +71, -1, +1, -1, +1, -1, +1, -1, +1, -1, +1, -1, +1, -1, +1, -1, +1, -1,
+            +11, -1, +1, -1, +1, -1, +1, -1, +1, -1, +1, -1, +1, -1, +1, -1, +1, -1, +1, -1, +1, -1, +1, -1, +1, -1,
+            +1, -1, +1, -1,
         ],
         dtype=np.int32,
     )
     # fmt: off
     new_demag_val = Integer32_1(new_demag_values)
     await fluxgrip_config.configure_demag_cycle(new_demag_val)
-    await asyncio.sleep(5)
+    await asyncio.sleep(10)
     await fluxgrip_config.magnetize()
-    await asyncio.sleep(5)
+    await asyncio.sleep(10)
     await fluxgrip_config.demagnetize()
     try:
         await asyncio.Event().wait()  # Keeps the event loop running forever

@@ -231,15 +231,9 @@ class FluxGripConfig:
         await asyncio.sleep(5)  # Give some time for reboot to start
         await self.wait_for_node_online()
 
-    async def sub_feedback_flush(self):
-        # QUESTION: Is there a better way to deal with this issue?
-        _ = await self._sub_feedback.get()
-        _ = await self._sub_feedback.get()
-        _ = await self._sub_feedback.get()
-        _ = await self._sub_feedback.get()
-
     async def magnetize(self) -> None:
-        await self.sub_feedback_flush()
+        while await self._sub_feedback.get(0):
+            pass
         feedback_msg = await self._sub_feedback.get(20)
         assert feedback_msg is not None
         assert feedback_msg.magnetized == False
@@ -248,10 +242,11 @@ class FluxGripConfig:
 
         async def wait_for_magnet_to_magnetize() -> None:
             feedback_msg = await self._sub_feedback.get(5)
-            while feedback_msg.magnetized:
+            while not feedback_msg.magnetized:
                 _logger.info("Waiting for magnet to magnetize")
-                await asyncio.sleep(1)
                 feedback_msg = await self._sub_feedback.get(5)
+                while await self._sub_feedback.get(0):
+                    pass
 
         try:
             await asyncio.wait_for(wait_for_magnet_to_magnetize(), timeout=10)
@@ -260,7 +255,8 @@ class FluxGripConfig:
             raise TimeoutError("Timeout while waiting for magnet to magnetize")
 
     async def demagnetize(self) -> None:
-        await self.sub_feedback_flush()
+        while await self._sub_feedback.get(0):
+            pass
         feedback_msg = await self._sub_feedback.get(20)
         assert feedback_msg is not None
         assert feedback_msg.magnetized == True
@@ -271,8 +267,9 @@ class FluxGripConfig:
             feedback_msg = await self._sub_feedback.get(5)
             while feedback_msg.magnetized:
                 _logger.info("Waiting for magnet to demagnetize")
-                await asyncio.sleep(1)
                 feedback_msg = await self._sub_feedback.get(5)
+                while await self._sub_feedback.get(0):
+                    pass
 
         try:
             await asyncio.wait_for(wait_for_magnet_to_demagnetize(), timeout=10)

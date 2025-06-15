@@ -13,7 +13,7 @@ _logger = logging.getLogger(__name__)
 
 
 async def main() -> None:
-    force_sensor_port = serial.serial_for_url("/dev/ttyUSB1", baudrate=38400)
+    force_sensor_port = serial.serial_for_url("/dev/ttyUSB0", baudrate=38400)
     force_sensor_interface = ForceSensorInterface(force_sensor_port)
     await force_sensor_interface.do_bias_calibration()
     force_sensor_interface.reset_peak_force()
