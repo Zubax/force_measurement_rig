@@ -1,3 +1,0 @@
-pyserial    ~= 3.5
-click       ~= 8.1
-numpy       ~= 1.24
