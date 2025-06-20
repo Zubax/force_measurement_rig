@@ -25,8 +25,9 @@ class ForceRig:
 
     async def setup(self):
         await self._step_drive_control.stop()
+
         await self._force_sensor_interface.do_bias_calibration()
-        self._force_sensor_interface.reset_peak_force()
+
         force_reading = await self._force_sensor_interface.read_instant_force(timeout=1)
         _logger.info(f"force_reading after calibration: {force_reading:.1f} N")
         self._fluxgrip_config = FluxGripConfig()

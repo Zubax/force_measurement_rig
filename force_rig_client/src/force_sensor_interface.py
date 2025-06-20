@@ -151,35 +151,42 @@ class ForceSensorInterface(IOManager):
         )
         return np.allclose(rd.calibration, cal, atol=1e-3, rtol=1e-3, equal_nan=True)
 
+    async def do_bias_calibration(self, uncalibrated_forces: NDArray[np.float64], n_samples: int) -> NDArray[np.float64]:
+        agg = np.zeros_like(uncalibrated_forces)
+        log_interval = max(n_samples // 10, 1) # Log progress at 10% intervals
 
-def compute_forces(rd: ForceSensorReading) -> NDArray[np.float64]:
-    return np.array(
-        [
-            np.polynomial.Polynomial(np.flip(coe.flatten()))(float(x))
-            for x, coe in zip(rd.adc_readings, rd.calibration.T)
-        ]
-    )
+        for i in range(n_samples):
+            agg += self.compute_forces(await self.fetch())
+            if (i+1) % log_interval == 0 or i == n_samples - 1:
+                _logger.debug("Calibrating bias... %d/%d samples collected", i + 1, n_samples)
+
+        return agg / n_samples
+
+    async def fetch(self, flush=False) -> ForceSensorReading:
+        if flush:
+            await self.flush()
+        rd = await self.read(deadline=asyncio.get_running_loop().time() + 10.0)
+        if rd is None:
+            raise RuntimeError("Timed out while waiting for data")
+        return rd
+
+    async def get_instant_forces(self, calibrate=False) -> NDArray[np.float64]:
+        if calibrate:
+            rd = await self.fetch(flush=True)
+            forces = self.compute_forces(rd)
+            self._zero_bias = await self.do_bias_calibration(forces, 50)
+            _logger.debug(f"Zero bias: {self._zero_bias} N")
+        rd = await self.fetch(flush=False)
+        forces = self.compute_forces(rd) - self._zero_bias
+        return forces
 
 
-async def fetch(iom: ForceSensorInterface, loop: asyncio.AbstractEventLoop, flush=False) -> ForceSensorReading:
-    if flush:
-        await iom.flush()
-    rd = await iom.read(deadline=loop.time() + 10.0)
-    if rd is None:
-        raise RuntimeError("Timed out while waiting for data")
-    return rd
 
-
-async def do_bias_calibration(
-    iom: ForceSensorInterface, loop: asyncio.AbstractEventLoop, uncalibrated_forces: NDArray[np.float64], n_samples: int
-) -> NDArray[np.float64]:
-
-    agg = np.zeros_like(uncalibrated_forces)
-    log_interval = max(n_samples // 10, 1)  # Log progress at 10% intervals
-
-    for i in range(n_samples):
-        agg += compute_forces(await fetch(iom, loop))
-        if (i + 1) % log_interval == 0 or i == n_samples - 1:
-            _logger.debug("Calibrating bias... %d/%d samples collected", i + 1, n_samples)
-
-    return agg / n_samples
+    @staticmethod
+    def compute_forces(rd: ForceSensorReading) -> NDArray[np.float64]:
+        return np.array(
+            [
+                np.polynomial.Polynomial(np.flip(coe.flatten()))(float(x))
+                for x, coe in zip(rd.adc_readings, rd.calibration.T)
+            ]
+        )

@@ -18,9 +18,6 @@ from force_sensor_interface import (
     ForceSensorReading,
     MovingAverage,
     ForceSensorInterface,
-    compute_forces,
-    fetch,
-    do_bias_calibration,
 )
 
 
@@ -70,22 +67,18 @@ async def display(port: serial.Serial, fir_order: int, calibrate_zero_bias: bool
     Display the force readings from the FMR rig in a human-readable format. This is the main command.
     """
 
-    iom = ForceSensorInterface(port)
-    _logger.info("Starting %s", iom)
+    force_sensor_interface = ForceSensorInterface(port)
+    _logger.info("Starting %s", force_sensor_interface)
     loop = asyncio.get_running_loop()
     f_peak = 0.0
     try:
-        rd = await fetch(iom, loop)
-        forces = compute_forces(rd)
+        forces = await force_sensor_interface.get_instant_forces(calibrate=True) # 1 run to calibrate
         lpf = MovingAverage(fir_order, forces)
-        zero_bias = np.zeros_like(forces)
-        if calibrate_zero_bias:
-            zero_bias = await do_bias_calibration(iom, loop, forces, 50)
-            inform(f"Zero bias: {zero_bias} N")
+        counter = 0
         while True:
-            rd = await fetch(iom, loop)
-            forces = lpf(compute_forces(rd) - zero_bias)
-            fmt = click.style(f"#{rd.seq_num:06d}: ", dim=True)
+            forces = await force_sensor_interface.get_instant_forces()
+            # filtered_forces = lpf(forces) # I don't think this filter is necessary
+            fmt = click.style(f"#{counter:06d}: ", dim=True)
             breakdown = "".join(f"{x:+08.1f}" for x in forces)
             f_instant = sum(forces)
             f_peak = f_instant if abs(f_instant) > abs(f_peak) else f_peak
@@ -93,10 +86,11 @@ async def display(port: serial.Serial, fir_order: int, calibrate_zero_bias: bool
             fmt += click.style(f" = {breakdown}", dim=True)
             fmt += click.style(f" F_peak = {f_peak:+08.1f} N", fg="cyan", bold=True)
             inform(f"\r{fmt}  ", nl=False)
+            counter +=1
     except KeyboardInterrupt:
         pass
     finally:
-        iom.close()
+        force_sensor_interface.close()
 
 
 @cli.command()
@@ -144,9 +138,8 @@ async def calibrate(port: serial.Serial, nsamples: int) -> None:
                 break
             force = float(inp)
             sigma = 0
-            loop = asyncio.get_running_loop()
             for j in range(nsamples):
-                sigma += int((await fetch(iom, loop, flush=j == 0)).adc_readings[idx])
+                sigma += int((await iom.fetch(flush=j == 0)).adc_readings[idx])
                 inform(
                     f"\rSample {j + 1} of {nsamples}: ADC {sigma / (j+1):010.0f} -> {force:06.1f} N ",
                     nl=False,
@@ -169,7 +162,7 @@ async def calibrate(port: serial.Serial, nsamples: int) -> None:
     iom = ForceSensorInterface(port)
     _logger.info("Starting %s", iom)
     try:
-        rd = await fetch(iom, loop, flush=True)
+        rd = await iom.fetch(flush=True)
         chan_count = len(rd.adc_readings)
         cal = rd.calibration.copy()  # Make a copy because the source may be non-modifiable.
         inform(f"Original calibration coeffs:\n{cal}", fg="yellow")

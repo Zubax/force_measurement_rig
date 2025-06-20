@@ -9,16 +9,7 @@ from typing import Any, Callable, Coroutine
 from shutil import get_terminal_size
 from client_utils import inform, coroutine
 
-from fluxgrip_config import FluxGripConfig
-from step_drive_control import StepDriveControl
-from force_sensor_interface import (
-    ForceSensorInterface,
-    MovingAverage,
-    ForceSensorReading,
-    compute_forces,
-    fetch,
-    do_bias_calibration,
-)
+from force_rig import ForceRig
 
 from uavcan.primitive.array import Integer32_1
 
@@ -75,12 +66,14 @@ step_drive_port_option = click.option(
 @cli.command()
 @force_sensor_port_option
 @step_drive_port_option
-@click.option("--duration", "-d", default=1, show_default=True, help="Timeout until the motor stops running")
 @coroutine
-async def execute(force_port: serial.Serial, drive_port: serial.Serial, duration: int) -> None:
+async def execute(force_port: serial.Serial, drive_port: serial.Serial) -> None:
     """
     Execute a full force measurement cycle
     """
+    inform("Setting up ForceRig")
+    force_rig = ForceRig(drive_port, force_port)
+    await force_rig.setup()
     step_drive_control = StepDriveControl(drive_port)
     force_sensor_interface = ForceSensorInterface(force_port)
     fluxgrip_config = FluxGripConfig()
