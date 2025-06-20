@@ -85,12 +85,12 @@ void platform_driver_step(bool direction)
     // Update DIR pin
     if (direction)
     {
-        OCR1A = 3000; // Faster speed for downwards movement
+        OCR1A = 65535; // Faster speed for downwards movement
         pin_write((struct pin_spec){&PORTB, 2}, true);
     }
     else
     {
-        OCR1A = 30000; // Slower speed for upwards movement
+        OCR1A = 65535; // Slower speed for upwards movement
         pin_write((struct pin_spec){&PORTB, 2}, false);
     }
 }
