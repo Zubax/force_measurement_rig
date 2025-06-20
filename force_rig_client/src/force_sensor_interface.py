@@ -58,7 +58,7 @@ class ForceSensorReading:
     adc_readings: NDArray[np.int32]
     calibration: NDArray[np.float64]
 
-    CHANNEL_COUNT = 4
+    CHANNEL_COUNT = 2
 
 
 class ForceSensorInterface(IOManager):
@@ -141,7 +141,7 @@ class ForceSensorInterface(IOManager):
         await self.flush()
         rd = await self.read(asyncio.get_event_loop().time() + 10)
         if rd is None:
-            _logger.info("%s: Calibration confirmation timed out", self)
+            _logger.debug("%s: Calibration confirmation timed out", self)
             return False
         _logger.info(
             "%s: Received calibration confirmation. Sent calibration:\n%s\nReceived calibration:\n%s",
@@ -161,7 +161,9 @@ def compute_forces(rd: ForceSensorReading) -> NDArray[np.float64]:
     )
 
 
-async def fetch(iom: ForceSensorInterface, loop: asyncio.AbstractEventLoop) -> ForceSensorReading:
+async def fetch(iom: ForceSensorInterface, loop: asyncio.AbstractEventLoop, flush=False) -> ForceSensorReading:
+    if flush:
+        await iom.flush()
     rd = await iom.read(deadline=loop.time() + 10.0)
     if rd is None:
         raise RuntimeError("Timed out while waiting for data")
@@ -178,6 +180,6 @@ async def do_bias_calibration(
     for i in range(n_samples):
         agg += compute_forces(await fetch(iom, loop))
         if (i + 1) % log_interval == 0 or i == n_samples - 1:
-            _logger.info("Calibrating bias... %d/%d samples collected", i + 1, n_samples)
+            _logger.debug("Calibrating bias... %d/%d samples collected", i + 1, n_samples)
 
     return agg / n_samples

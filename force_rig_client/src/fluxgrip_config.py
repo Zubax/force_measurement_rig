@@ -66,9 +66,9 @@ class RegisterProxy(collections.abc.Mapping[str, pycyphal.application.register.V
         self._cache.clear()
         for n in names:
             await self.read_through(n)
-        _logger.info("Fetched registers:")
+        _logger.debug("Fetched registers:")
         for key, value in self._cache.items():
-            _logger.info(f"{key} -> {repr(value)}")
+            _logger.debug(f"{key} -> {repr(value)}")
         assert names == set(self._cache.keys())
 
     async def read_through(self, name: str) -> ValueProxyWithFlags:
@@ -169,13 +169,13 @@ class FluxGripConfig:
                 node_info = node.info
                 if node_info and node_info.name.tobytes().decode() == "com.zubax.fluxgrip":
                     assert node_id == DEFAULT_TARGET_NODE_ID, "Expects FluxGrip to have DEFAULT_TARGET_NODE_ID"
-                    _logger.info("FluxGrip found!")
+                    _logger.debug("FluxGrip found!")
                     fluxgrip_found = True
                 else:
                     await asyncio.sleep(1)
-                    _logger.info("Waiting for FluxGrip to come online...")
+                    _logger.debug("Waiting for FluxGrip to come online...")
             await asyncio.sleep(1)
-            _logger.info(f"Online nodes: {len(self._node_tracker.registry.items())}")
+            _logger.debug(f"Online nodes: {len(self._node_tracker.registry.items())}")
 
     async def start(self) -> None:
         available_canfaces = list(Path("/dev/serial/by-id").glob("usb-*Zubax*Babel*"))
@@ -191,7 +191,7 @@ class FluxGripConfig:
             "uavcan.node.id": ValueProxy(Natural16([DEFAULT_CONTROLLER_NODE_ID])),
         }
         self._transport = make_transport(reg)
-        _logger.info(f"Transport configured: {self._transport}")
+        _logger.debug(f"Transport configured: {self._transport}")
 
         self._controller_node = pycyphal.application.make_node(
             info=GetInfo_1.Response(name="org.opencyphal.controller.node"),
@@ -201,29 +201,29 @@ class FluxGripConfig:
         self._node_tracker = pycyphal.application.node_tracker.NodeTracker(self._controller_node)
         self._node_tracker.get_info_timeout = 1.0
         self._controller_node.start()
-        _logger.info(f"Controller node started: {self._controller_node}")
+        _logger.debug(f"Controller node started: {self._controller_node}")
 
         await self.wait_for_node_online()
 
         self._register_proxy = RegisterProxy(self._controller_node, DEFAULT_TARGET_NODE_ID)
         await self._register_proxy.reload()
 
-        _logger.info("Setting up Command publisher")
+        _logger.debug("Setting up Command publisher")
         self._pub_command = self._controller_node.make_publisher(Integer8_1, EXPECTED_COMMAND_TOPIC_ID)
 
-        _logger.info("Setting up Feedback subscriber")
+        _logger.debug("Setting up Feedback subscriber")
         self._sub_feedback = self._controller_node.make_subscriber(Feedback_0, EXPECTED_FEEDBACK_TOPIC_ID)
 
     def close(self) -> None:
         self._controller_node.close()
-        _logger.info(f"Controller node closed!")
+        _logger.debug(f"Controller node closed!")
 
     async def configure_demag_cycle(self, demag_val: Integer32_1):
         assert len(demag_val.value) == 51
-        _logger.info(f"Setting new demag cycle values: {demag_val}")
+        _logger.debug(f"Setting new demag cycle values: {demag_val}")
         res = int(await self._register_proxy.write_through("magnet.demag", demag_val))
-        _logger.info(f"Read back demag values: {res}")
-        _logger.info("Rebooting FluxGrip")
+        _logger.debug(f"Read back demag values: {res}")
+        _logger.debug("Rebooting FluxGrip")
         cln_exe = self._controller_node.make_client(ExecuteCommand_1, DEFAULT_TARGET_NODE_ID)
         resp, _ = await cln_exe.call(ExecuteCommand_1.Request(command=ExecuteCommand_1.Request.COMMAND_RESTART))
         assert isinstance(resp, ExecuteCommand_1.Response)
@@ -242,15 +242,15 @@ class FluxGripConfig:
 
         async def wait_for_magnet_to_magnetize() -> None:
             feedback_msg = await self._sub_feedback.get(5)
-            while not feedback_msg.magnetized:
-                _logger.info("Waiting for magnet to magnetize")
+            while not feedback_msg.magnetized or not feedback_msg.remagnetization_state == 0:
+                _logger.debug("Waiting for magnet to magnetize")
                 feedback_msg = await self._sub_feedback.get(5)
                 while await self._sub_feedback.get(0):
                     pass
 
         try:
             await asyncio.wait_for(wait_for_magnet_to_magnetize(), timeout=10)
-            _logger.info("Magnetized successfully")
+            _logger.debug("Magnetized successfully")
         except asyncio.TimeoutError:
             raise TimeoutError("Timeout while waiting for magnet to magnetize")
 
@@ -265,14 +265,14 @@ class FluxGripConfig:
 
         async def wait_for_magnet_to_demagnetize() -> None:
             feedback_msg = await self._sub_feedback.get(5)
-            while feedback_msg.magnetized:
-                _logger.info("Waiting for magnet to demagnetize")
+            while feedback_msg.magnetized or not feedback_msg.remagnetization_state == 0:
+                _logger.debug("Waiting for magnet to demagnetize")
                 feedback_msg = await self._sub_feedback.get(5)
                 while await self._sub_feedback.get(0):
                     pass
 
         try:
-            await asyncio.wait_for(wait_for_magnet_to_demagnetize(), timeout=10)
-            _logger.info("Demagnetized successfully")
+            await asyncio.wait_for(wait_for_magnet_to_demagnetize(), timeout=60)
+            _logger.debug("Demagnetized successfully")
         except asyncio.TimeoutError:
             raise TimeoutError("Timeout while waiting for magnet to demagnetize")

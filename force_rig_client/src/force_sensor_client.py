@@ -114,14 +114,6 @@ async def calibrate(port: serial.Serial, nsamples: int) -> None:
         raise click.BadParameter("must be positive", param_hint="nsamples")
     loop = asyncio.get_running_loop()
 
-    async def fetch(flush: bool) -> ForceSensorReading:
-        if flush:
-            await iom.flush()
-        rd = await iom.read(deadline=loop.time() + 10.0)
-        if rd is None:
-            raise RuntimeError("Timed out while waiting for data")
-        return rd
-
     async def calibrate_one(idx: int) -> NDArray[np.float64] | None:
         """Calibrate one channel and return its calibration coefficients."""
         min_samples = 2
@@ -152,8 +144,9 @@ async def calibrate(port: serial.Serial, nsamples: int) -> None:
                 break
             force = float(inp)
             sigma = 0
+            loop = asyncio.get_running_loop()
             for j in range(nsamples):
-                sigma += (await fetch(flush=j == 0)).adc_readings[idx]
+                sigma += int((await fetch(iom, loop, flush=j == 0)).adc_readings[idx])
                 inform(
                     f"\rSample {j + 1} of {nsamples}: ADC {sigma / (j+1):010.0f} -> {force:06.1f} N ",
                     nl=False,
@@ -176,7 +169,7 @@ async def calibrate(port: serial.Serial, nsamples: int) -> None:
     iom = ForceSensorInterface(port)
     _logger.info("Starting %s", iom)
     try:
-        rd = await fetch(flush=True)
+        rd = await fetch(iom, loop, flush=True)
         chan_count = len(rd.adc_readings)
         cal = rd.calibration.copy()  # Make a copy because the source may be non-modifiable.
         inform(f"Original calibration coeffs:\n{cal}", fg="yellow")

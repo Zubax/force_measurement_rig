@@ -89,59 +89,7 @@ async def execute(force_port: serial.Serial, drive_port: serial.Serial, duration
         await fluxgrip_config.start()
 
         new_demag_values = np.array(
-            [
-                -100,
-                -90,
-                -81,
-                +73,
-                +66,
-                -59,
-                -53,
-                +48,
-                -43,
-                +39,
-                -35,
-                +31,
-                -28,
-                +25,
-                -23,
-                +21,
-                -19,
-                +17,
-                -15,
-                +14,
-                -12,
-                +11,
-                -10,
-                +9,
-                -8,
-                +7,
-                -6,
-                +6,
-                -5,
-                +5,
-                -4,
-                +4,
-                -3,
-                +3,
-                -3,
-                +3,
-                -2,
-                +2,
-                -2,
-                +2,
-                -1,
-                +1,
-                -1,
-                +1,
-                -1,
-                +1,
-                -1,
-                +1,
-                -1,
-                +1,
-                -1,
-            ],
+            [-100, -90, -81,  73,  66, -59, -53,  48,  43, -39, -35,  31,  28, -25, -23,  21,  19, -17, -15,  14, -12,  11, -10,   9,  -8, -10,  43,  23, -17,   7,   2,  46,  34,  25,   4,   9,  47,  11, -22, -20, -33, -48,  -8, -11, -21, -49, -30,  21,  29,  11,  43],
             dtype=np.int32,
         )
         # [-100,-90,-81,+73,+66,-59,-53,+48,+43,-39,-35,+31,+28,-25,-23,+21,+19,-17,-15,+14,-12,+11,-10,+9,-8,+7,-6,+6,-5,+5,-4,+4,-3,+3,-3,+3,-2,+2,-2,+2,-1,+1,-1,+1,-1,+1,-1,+1,-1,+1,-1],
@@ -151,19 +99,19 @@ async def execute(force_port: serial.Serial, drive_port: serial.Serial, duration
         # Move arm down
         # if not duration > 0:
         #     raise click.BadParameter("must be positive", param_hint="duration")
-        # inform(f"Moving arm downwards for {duration/100} seconds")
-        # await step_drive_control.down()
-        # await asyncio.sleep(duration/100) # Downwards movement is much faster than upwards
-        # await step_drive_control.stop()
+        inform(f"Moving arm downwards for 1 second")
+        await step_drive_control.down()
+        await asyncio.sleep(1) # Downwards movement is much faster than upwards
+        await step_drive_control.stop()
 
-        # inform("Make sure the plate is attached correctly! (and press Enter to continue)")
-        # await asyncio.to_thread(input)
+        inform("Make sure the plate is attached correctly! (and press Enter to continue)")
+        await asyncio.to_thread(input)
 
         # Magnetize and demagnetize
         await fluxgrip_config.magnetize()
-        await asyncio.sleep(4)
+        await asyncio.sleep(3)
         await fluxgrip_config.demagnetize()
-        await asyncio.sleep(5)
+        await asyncio.sleep(3)
 
         # Setup force sensor
         f_abs_peak = 0.0
@@ -176,10 +124,13 @@ async def execute(force_port: serial.Serial, drive_port: serial.Serial, duration
         zero_bias = await do_bias_calibration(force_sensor_interface, loop, forces, 50)
 
         # Move arm up and print the force sensor data
-        inform(f"Moving arm downwards for {duration} seconds")
+        inform(f"Moving arm upwards for {duration} seconds")
         await step_drive_control.up()
         timeout = loop.time() + duration
-        while loop.time() < timeout:
+        f_pos_peak_buffer = [0] * 10
+        has_started_pulling = False
+        plate_attached = True
+        while loop.time() < timeout and plate_attached:
             rd = await fetch(force_sensor_interface, loop)
             forces = lpf(compute_forces(rd) - zero_bias)
             fmt = click.style(f"#{rd.seq_num:06d}: ", dim=True)
@@ -187,11 +138,22 @@ async def execute(force_port: serial.Serial, drive_port: serial.Serial, duration
             f_instant = sum(forces)
             f_abs_peak = f_instant if abs(f_instant) > abs(f_abs_peak) else f_abs_peak
             f_pos_peak = f_instant if f_instant > f_pos_peak else f_pos_peak
+            f_pos_peak_buffer = f_pos_peak_buffer[1:] + [f_pos_peak]
             fmt += click.style(f"F = {f_instant:+08.1f} N", fg="green", bold=True)
             fmt += click.style(f" F_breakdown = {breakdown}", dim=True)
             fmt += click.style(f" F_abs_peak = {f_abs_peak:+08.1f} N", fg="cyan", bold=True)
             fmt += click.style(f" F_pos_peak = {f_pos_peak:+08.1f} N", fg="magenta", bold=True)
             inform(f"\r{fmt}  ", nl=False)
+            is_increasing = all(f_pos_peak_buffer[i] < f_pos_peak_buffer[i + 1] for i in range(len(f_pos_peak_buffer) - 1))
+            if is_increasing:
+                inform("Has started pulling")
+                has_started_pulling = True
+            if has_started_pulling:
+                delta = f_pos_peak - f_instant
+                if delta > 1:
+                    inform("Plate has detached")
+                    plate_attached = False
+                    # await asyncio.sleep(2) # Allow arm to move a little higher before stopping
         await step_drive_control.stop()
     except KeyboardInterrupt:
         pass

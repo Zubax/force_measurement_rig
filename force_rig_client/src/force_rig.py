@@ -7,7 +7,6 @@ import numpy as np
 from fluxgrip_config import FluxGripConfig
 from force_sensor_interface import ForceSensorInterface
 from step_drive_control import StepDriveControl
-from optimizer import DEMAG_REGISTER_LENGTH
 
 from typing import Optional
 from numpy.typing import NDArray
@@ -40,7 +39,6 @@ class ForceRig:
         self._fluxgrip_config.close()
 
     async def configure_demag_register(self, data: NDArray[np.int32]):
-        assert data.size == DEMAG_REGISTER_LENGTH
         dsdl_data = Integer32_1(data)
         await self._fluxgrip_config.configure_demag_cycle(dsdl_data)
 
