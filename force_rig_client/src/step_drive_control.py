@@ -80,15 +80,15 @@ class StepDriveControl(IOManager):
         return rd is not None and (rd.step == command)
 
     async def up(self):
-        _logger.info("ARM IS MOVING UP")
+        _logger.debug("ARM IS MOVING UP")
         while not await self._send_command(self._DIRECTION_TO_STEP["UP"]):
-            _logger.info("Sending command to pull arm up")
+            _logger.debug("Sending command to pull arm up")
 
     async def stop(self):
         while not await self._send_command(self._DIRECTION_TO_STEP["STOP"]):
-            _logger.info("Sending command to stop arm")
+            _logger.debug("Sending command to stop arm")
 
     async def down(self):
-        _logger.info("ARM IS MOVING DOWN")
+        _logger.debug("ARM IS MOVING DOWN")
         while not await self._send_command(self._DIRECTION_TO_STEP["DOWN"]):
-            _logger.info("Sending command to pull arm down")
+            _logger.debug("Sending command to pull arm down")

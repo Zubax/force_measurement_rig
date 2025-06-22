@@ -11,6 +11,7 @@ from serial_interface import IOManager, Packet
 from numpy.typing import NDArray
 from typing import Optional, TypeVar, Generic
 
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(process)07d %(levelname)-3.3s %(name)s: %(message)s")
 _logger = logging.getLogger(__name__)
 
 T = TypeVar("T")
@@ -176,7 +177,7 @@ class ForceSensorInterface(IOManager):
             forces = self.compute_forces(rd)
             self._zero_bias = await self.do_bias_calibration(forces, 50)
             _logger.debug(f"Zero bias: {self._zero_bias} N")
-        rd = await self.fetch(flush=False)
+        rd = await self.fetch(flush=True)
         forces = self.compute_forces(rd) - self._zero_bias
         return forces
 

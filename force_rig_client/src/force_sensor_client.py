@@ -21,7 +21,7 @@ from force_sensor_interface import (
 )
 
 
-logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(process)07d %(levelname)-3.3s %(name)s: %(message)s")
+logging.basicConfig(level=logging.DEBUG, format="%(asctime)s %(process)07d %(levelname)-3.3s %(name)s: %(message)s")
 _logger = logging.getLogger(__name__)
 
 

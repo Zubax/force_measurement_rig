@@ -1,15 +1,27 @@
 import asyncio
+import time
+from collections import deque
+from matplotlib import pyplot
+
 import click
 import logging
+
+import emoji
 import serial
 import sys
 import numpy as np
 
 from typing import Any, Callable, Coroutine
 from shutil import get_terminal_size
+
+from matplotlib.pyplot import savefig
+
 from client_utils import inform, coroutine
 
 from force_rig import ForceRig
+from force_sensor_interface import ForceSensorInterface
+from fluxgrip_config import FluxGripConfig
+from step_drive_control import StepDriveControl
 
 from uavcan.primitive.array import Integer32_1
 
@@ -69,93 +81,149 @@ step_drive_port_option = click.option(
 @coroutine
 async def execute(force_port: serial.Serial, drive_port: serial.Serial) -> None:
     """
-    Execute a full force measurement cycle
+    Execute a full force measurement cycle.
+    Assumes that start is with arm at top position
     """
-    inform("Setting up ForceRig")
+    # Measuring some demagnetization parameter set goes as follows:
+    # Starting position of arm is assumed to be at t=0
+    # 1. Setup:
+    #    - calibration of force sensor
+    #    - configuration of magnet
+    # 2. Moving arm downwards, until either:
+    #    - force sensor reports a negative force above 1N
+    #    - t_max is reached (something went wrong)
+    # 3. Magnet is magnetized and demagnetized
+    # 4. Arm is moved upwards, force sensor readings are recorded
+    #    - raw_force_sensor_reading
+    #    - first_derivative_force
+    # 5. Once first_derivative_force is larger than FIRST_DERIVATIVE_PULLING_THRESHOLD -> Pulling has started
+    # 6. Once first_derivative_force is smaller than FIRST_DERIVATIVE_DETACHED_THRESHOLD -> Plate is detached
+    # 7. Print max force
+    test_values = [[-100, -90, -81,  73,  66, -59, -53,  48,  43, -39, -35,  31,  28, -25, -23,  21,  19, -17, -15,  14, -12,  11, -10,   9,  -8, -10,  43,  23, -17,   7,   2,  46,  34,  25,   4,   9,  47,  11, -22, -20, -33, -48,  -8, -11, -21, -49, -30,  21,  29,  11,  43],
+                   [-100, -90, -81,  73,  66, -59, -53,  48,  43, -39, -35,  31,  28, -25, -23,  21,  19, -17, -15,  14, -12,  11, -10,   9,  -8, -10,  43,  23, -17,   7,   2,  46,  34,  25,   4,   9,  47,  11, -22, -20, -33, -48,  -8, -11, -21, -49, -30,  21,  29,  11,  43]]
     force_rig = ForceRig(drive_port, force_port)
+    inform("Force rig setup")
     await force_rig.setup()
-    step_drive_control = StepDriveControl(drive_port)
-    force_sensor_interface = ForceSensorInterface(force_port)
+
     fluxgrip_config = FluxGripConfig()
-    try:
-        inform("Configuring FluxGrip")
-        await fluxgrip_config.start()
+    inform("FluxGrip setup")
+    await fluxgrip_config.start()
 
-        new_demag_values = np.array(
-            [-100, -90, -81,  73,  66, -59, -53,  48,  43, -39, -35,  31,  28, -25, -23,  21,  19, -17, -15,  14, -12,  11, -10,   9,  -8, -10,  43,  23, -17,   7,   2,  46,  34,  25,   4,   9,  47,  11, -22, -20, -33, -48,  -8, -11, -21, -49, -30,  21,  29,  11,  43],
-            dtype=np.int32,
-        )
-        # [-100,-90,-81,+73,+66,-59,-53,+48,+43,-39,-35,+31,+28,-25,-23,+21,+19,-17,-15,+14,-12,+11,-10,+9,-8,+7,-6,+6,-5,+5,-4,+4,-3,+3,-3,+3,-2,+2,-2,+2,-1,+1,-1,+1,-1,+1,-1,+1,-1,+1,-1],
-        new_demag_val = Integer32_1(new_demag_values)
-        await fluxgrip_config.configure_demag_cycle(new_demag_val)
+    for test_value_index in range(0, len(test_values)):
+        try:
+            new_demag_values = Integer32_1(np.array(
+                test_values[test_value_index],
+                dtype=np.int32,
+            ))
+            inform(f"Testing demag values: {test_values[test_value_index]}")
+            await fluxgrip_config.configure_demag_cycle(new_demag_values)
 
-        # Move arm down
-        # if not duration > 0:
-        #     raise click.BadParameter("must be positive", param_hint="duration")
-        inform(f"Moving arm downwards for 1 second")
-        await step_drive_control.down()
-        await asyncio.sleep(1) # Downwards movement is much faster than upwards
-        await step_drive_control.stop()
+            inform("Moving arm downwards until TOUCH_FORCE is detected")
 
-        inform("Make sure the plate is attached correctly! (and press Enter to continue)")
-        await asyncio.to_thread(input)
+            t_current = 0 # We assume we're starting from top position
+            TOUCH_FORCE = -1.0 # Once pressure sensor detect 1N, we can assume the plate has touched the magnet
+            start_time_down = time.time()
+            await force_rig.move_arm_down()
+            counter = 0
+            while True:
+                f_instant = await force_rig.get_instant_force()
+                fmt = click.style(f"#{counter:06d}: ", dim=True)
+                fmt += click.style(f"F_instant = {f_instant:+08.1f} N", fg="cyan", bold=True)
+                inform(f"\r{fmt}", nl=False)
+                if f_instant < TOUCH_FORCE:
+                    break
+                counter +=1
 
-        # Magnetize and demagnetize
-        await fluxgrip_config.magnetize()
-        await asyncio.sleep(3)
-        await fluxgrip_config.demagnetize()
-        await asyncio.sleep(3)
+            await force_rig.move_arm_down_for(10.0) # To be sure the plate is completely flat on the magnet
+            t_current = time.time() - start_time_down
 
-        # Setup force sensor
-        f_abs_peak = 0.0
-        f_pos_peak = 0.0
-        loop = asyncio.get_running_loop()
-        forces_read = await fetch(force_sensor_interface, loop)
-        forces = compute_forces(forces_read)
-        lpf = MovingAverage(2, forces)  # fir_order = 2 (default)
-        inform(f"Calibrating")
-        zero_bias = await do_bias_calibration(force_sensor_interface, loop, forces, 50)
+            # Magnetize and demagnetize
+            inform("\nMagnetizing and demagnetizing")
+            await fluxgrip_config.magnetize()
+            await asyncio.sleep(1)
+            await fluxgrip_config.demagnetize()
+            await asyncio.sleep(1)
 
-        # Move arm up and print the force sensor data
-        inform(f"Moving arm upwards for {duration} seconds")
-        await step_drive_control.up()
-        timeout = loop.time() + duration
-        f_pos_peak_buffer = [0] * 10
-        has_started_pulling = False
-        plate_attached = True
-        while loop.time() < timeout and plate_attached:
-            rd = await fetch(force_sensor_interface, loop)
-            forces = lpf(compute_forces(rd) - zero_bias)
-            fmt = click.style(f"#{rd.seq_num:06d}: ", dim=True)
-            breakdown = "".join(f"{x:+08.1f}" for x in forces)
-            f_instant = sum(forces)
-            f_abs_peak = f_instant if abs(f_instant) > abs(f_abs_peak) else f_abs_peak
-            f_pos_peak = f_instant if f_instant > f_pos_peak else f_pos_peak
-            f_pos_peak_buffer = f_pos_peak_buffer[1:] + [f_pos_peak]
-            fmt += click.style(f"F = {f_instant:+08.1f} N", fg="green", bold=True)
-            fmt += click.style(f" F_breakdown = {breakdown}", dim=True)
-            fmt += click.style(f" F_abs_peak = {f_abs_peak:+08.1f} N", fg="cyan", bold=True)
-            fmt += click.style(f" F_pos_peak = {f_pos_peak:+08.1f} N", fg="magenta", bold=True)
-            inform(f"\r{fmt}  ", nl=False)
-            is_increasing = all(f_pos_peak_buffer[i] < f_pos_peak_buffer[i + 1] for i in range(len(f_pos_peak_buffer) - 1))
-            if is_increasing:
-                inform("Has started pulling")
-                has_started_pulling = True
-            if has_started_pulling:
-                delta = f_pos_peak - f_instant
-                if delta > 1:
-                    inform("Plate has detached")
-                    plate_attached = False
-                    # await asyncio.sleep(2) # Allow arm to move a little higher before stopping
-        await step_drive_control.stop()
-    except KeyboardInterrupt:
-        pass
-    finally:
-        await step_drive_control.stop()
-        step_drive_control.close()
-        force_sensor_interface.close()
-        fluxgrip_config.close()
+            # Move arm up and print the force sensor data
+            # 2 stop conditions:
+            # 1. if t_current risks becoming negative (we've reached the top)
+            # 2. if plate has detached (Force drops by DELTA_THRESHOLD)
+            DELTA_THRESHOLD = 0.5
+            start_time_up = time.time()
+            await force_rig.move_arm_up()
+            counter = 0
+            f_peak = 0.0
+            f_instant_storage = []
+            plate_detached = False
+            data_timeout = time.time()
+            while True:
+                f_instant = await force_rig.get_instant_force()
+                f_instant_storage.append(f_instant)
+                fmt = click.style(f"#{counter:06d}: ", dim=True)
+                f_peak = f_instant if f_instant > f_peak else f_peak
+                fmt += click.style(f"f_instant = {f_instant:+08.1f} N", fg="green", bold=True)
+                fmt += click.style(f" f_peak = {f_peak:+08.1f} N", fg="cyan", bold=True)
+                inform(f"\r{fmt}  ", nl=False)
+                counter +=1
+                if time.time() - start_time_up > t_current:
+                    inform("\nTop reached "+emoji.emojize(":melting_face:"))
+                    break
+                if len(f_instant_storage) > 2:
+                    if f_instant_storage[-2] - f_instant_storage[-1] > DELTA_THRESHOLD and not plate_detached:
+                        inform("Plate detached!")
+                        plate_detached = True
+                        data_timeout = time.time() + 10 # we collect a bit more data and make sure the plate is completely removed from magnet
+                if plate_detached:
+                    if time.time() > data_timeout:
+                        break
 
+            await force_rig.stop_arm()
+            total_time_up = time.time() - start_time_up
+            t_current -= total_time_up
+
+            # Plot out the result
+            fig, axs = pyplot.subplots(2, 1, figsize=(10, 8))
+
+            axs[0].plot(f_instant_storage, marker='o', color='blue')
+            axs[0].set_title("F_instant")
+            axs[0].set_xlabel("Time")
+            axs[0].set_ylabel("Force [N]")
+            axs[0].axhline(y=f_peak, color='red', linestyle='--', label='f_peak')
+            axs[0].grid(True)
+
+            # First derivative
+            f_diff = np.diff(f_instant_storage)
+            t_diff = range(1, len(f_instant_storage)) # is 1 point shorter
+
+            axs[1].plot(t_diff, f_diff, marker='x', color='orange')
+            axs[1].set_title("F_instant: first derivative")
+            axs[1].set_xlabel("Time")
+            axs[1].set_ylabel("ΔF / Δt")
+            axs[1].axhline(y=-DELTA_THRESHOLD, color='red', linestyle='--', label='delta_threshold')
+            axs[1].grid(True)
+
+            # Demag values used and resulting remaining magnetic force
+            test_value_counter = 1
+            demag_text =  "Demag values: " + ', '.join(map(str, test_values[test_value_index]))
+            result_text = f"\nF_peak: {f_peak:.2f} N"
+            fig.text(0.5, 0.01, demag_text+result_text, ha='center', va='bottom', fontsize=8, wrap=True)
+
+            pyplot.tight_layout(rect=[0, 0.06, 1, 1])  # leave space for the text
+            pyplot.savefig(f"result_{test_value_index}", format="png")
+
+            inform("\nReturning to start position")
+            if t_current > 0:
+                await force_rig.move_arm_up_for(t_current)
+
+        except KeyboardInterrupt:
+            await force_rig.stop_arm()
+            await force_rig.close()
+            fluxgrip_config.close()
+            pass
+
+    await force_rig.stop_arm()
+    await force_rig.close()
+    fluxgrip_config.close()
 
 def main() -> None:  # https://click.palletsprojects.com/en/8.1.x/exceptions/
     status: Any = 1
