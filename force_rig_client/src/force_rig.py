@@ -7,6 +7,7 @@ import numpy as np
 from fluxgrip_config import FluxGripConfig
 from force_sensor_interface import ForceSensorInterface
 from step_drive_control import StepDriveControl
+from client_utils import inform
 
 from typing import Optional
 from numpy.typing import NDArray
@@ -24,7 +25,6 @@ class ForceRig:
 
     async def setup(self):
         await self._step_drive_control.stop()
-
         _ = await self._force_sensor_interface.get_instant_forces(calibrate=True)
 
     async def close(self):
