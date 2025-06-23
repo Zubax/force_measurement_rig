@@ -42,7 +42,7 @@ class ForceMeasurementSession:
         for sample_index in range(0, len(samples)):
 
             try:
-                if fixed_pre_demag_values is not None:
+                if fixed_pre_demag_values is not None and len(demag_values) < 51:
                     demag_values = fixed_pre_demag_values + demag_values
                 assert len(demag_values) == 51, "Length of demag parameter is 51"
                 new_demag_values = Integer32_1(np.array(
@@ -61,7 +61,7 @@ class ForceMeasurementSession:
                 while True:
                     f_instant = await self._force_rig.get_instant_force()
                     fmt = click.style(f"#{counter:06d}: ", dim=True)
-                    fmt += click.style(f"F_instant = {f_instant:+08.1f} N", fg="cyan", bold=True)
+                    fmt += click.style(f"F_instant = {f_instant:+08.1f} N", fg="green", bold=True)
                     inform(f"\r{fmt}", nl=False)
                     if f_instant < TOUCH_FORCE:
                         break
@@ -100,6 +100,7 @@ class ForceMeasurementSession:
                     counter +=1
                     if time.time() - start_time_up > self._t_current:
                         inform("\nTop reached "+emoji.emojize(":melting_face:"))
+                        await self._force_rig.stop_arm()
                         assert False
                     if len(f_instant_storage) > 2:
                         if f_instant_storage[-2] - f_instant_storage[-1] > DELTA_THRESHOLD and not plate_detached:

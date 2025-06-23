@@ -88,7 +88,8 @@ async def execute(force_port: serial.Serial, drive_port: serial.Serial) -> None:
     Execute a full force measurement cycle.
     Assumes that start is with arm at top position
     """
-    test_values = [[-100, -90, -81,  73,  66, -59, -53,  48,  43, -39, -35,  31,  28, -25, -23,  21,  19, -17, -15,  14, -12,  11, -10,   9,  -8, -10,  43,  23, -17,   7,   2,  46,  34,  25,   4,   9,  47,  11, -22, -20, -33, -48,  -8, -11, -21, -49, -30,  21,  29,  11,  43]]
+    test_values = [[-100,-90,-81,+73,+66,-59,-53,+48,+43,-39,-35,+31,+28,-25,-23,+21,+19,-17,-15,+14,-12,+11,-10,+9, 50, -45, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+                   [-100,-90,-81,+73,+66,-59,-53,+48,+43,-39,-35,+31,+28,-25,-23,+21,+19,-17,-15,+14,-12,+11,-10,+9, -50, 45, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]]
     force_measurement_session = ForceMeasurementSession(force_port, drive_port)
     await force_measurement_session.setup()
 
@@ -107,15 +108,34 @@ def optimize(force_port: serial.Serial, drive_port: serial.Serial) -> None:
     """
     # Good initial guess
     x0 = [
-        +7,-6,+6,-5,+5,-4,+4,-3,+3,-3,+3,-2,+2,-2,+2,-1,+1,-1,+1,-1,+1,-1,+1,-1,+1,-1
+        8, 0, 24, -1, 7, -24, 11, -16, 24, -9, 17, -12, 10, -15, 22, -4, 9, -8, 3, -10, 7, -11, 2, 0, 5, -2
     ]
-    y0 = 8
+    y0 = 5.1
     force_measurement_session = ForceMeasurementSession(force_port, drive_port)
 
     loop = asyncio.new_event_loop()
     loop.run_until_complete(force_measurement_session.setup())
 
-    search_space = [Integer(-30, 30) for _ in range(len(x0))]
+    N = len(x0)
+    min_start, min_end = -50, -5
+    max_start, max_end = 50, 5
+
+    search_space = []
+    for i in range(N):
+        min_i = min_start + i * (min_end - min_start) / (N - 1)
+        max_i = max_start + i * (max_end - max_start) / (N - 1)
+
+        if i % 2 == 0:
+            # even index: only positive values
+            lower = max(0, min_i)
+            upper = max(0, max_i)
+        else:
+            # odd index: only negative values
+            lower = min(0, min_i)
+            upper = min(0, max_i)
+
+        # ensure integers
+        search_space.append(Integer(int(lower), int(upper)))
 
     def optimize_target(params) -> float:
         FIXED_PRE_DEMAG_VALUES = [-100,-90,-81,+73,+66,-59,-53,+48,+43,-39,-35,+31,+28,-25,-23,+21,+19,-17,-15,+14,-12,+11,-10,+9,-8]
@@ -123,7 +143,7 @@ def optimize(force_port: serial.Serial, drive_port: serial.Serial) -> None:
         return result
 
 
-    res = gp_minimize(optimize_target, search_space, n_calls=750, random_state=42, x0=x0, y0=y0)
+    res = gp_minimize(optimize_target, search_space, n_calls=300, random_state=42, x0=x0, y0=y0)
     inform(f"\n✅ Best force: {res.fun}")
     inform(f"\n🧲 Best demag values: {res.x}")
 
